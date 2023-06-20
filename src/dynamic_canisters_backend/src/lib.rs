@@ -1,12 +1,14 @@
 use std::cell::RefCell;
 
 use candid::Principal;
-use ic_cdk::api;
+use ic_cdk::{api, caller};
 use ic_cdk::api::call::CallResult;
 use ic_cdk::api::management_canister::main::CanisterSettings;
 use ic_cdk::export::candid::{
     candid_method, CandidType, check_prog, Deserialize, export_service, IDLProg, TypeEnv,
 };
+use serde_bytes;
+
 
 #[derive(Default)]
 struct WalletWASMBytes(Option<serde_bytes::ByteBuf>);
@@ -22,8 +24,8 @@ thread_local! {
 }
 
 
-#[candid_method(query)]
 #[ic_cdk::query]
+#[candid_method(query)]
 fn my_canister_id() -> String {
     format!("{}", ic_cdk::id())
 }
@@ -55,15 +57,15 @@ enum InstallMode {
 }
 
 
-#[candid_method(update)]
 #[ic_cdk::update]
+#[candid_method(update)]
 async fn create_canister() -> String {
     #[derive(CandidType)]
     struct In {
         settings: Option<CanisterSettings>,
     }
     let settings = CanisterSettings {
-        controllers: Some(vec![ic_cdk::api::id()]),
+        controllers: Some(vec![caller(), ic_cdk::api::id()]),
         compute_allocation: None,
         memory_allocation: None,
         freezing_threshold: None,
@@ -76,7 +78,7 @@ async fn create_canister() -> String {
         Principal::management_canister(),
         "create_canister",
         (in_arg, ),
-        400_000_000_000,
+        7_692_307_692,
     )
         .await
     {
@@ -90,28 +92,32 @@ async fn create_canister() -> String {
     };
 
     // wasm install
+    // cargo build --release --target --package dynamic_canisters_backend --locked
+    const wasm_module: &[u8] = std::include_bytes!(
+        "../dynamic_canisters_backend.wasm"
+    );
 
-    let wasm_module = WALLET_WASM_BYTES.with(|wallet_bytes| match &wallet_bytes.borrow().0 {
-        Some(o) => o.clone().into_vec(),
-        None => {
-            ic_cdk::trap("No wasm module stored.");
-        }
-    });
+//     let wasm_module = WALLET_WASM_BYTES.with(|wallet_bytes| match &wallet_bytes.borrow().0 {
+//         Some(o) => o.clone().into_vec(),
+//         None => {
+//             ic_cdk::trap("No wasm module stored.");
+//         }
+// });
 
     let install_config = CanisterInstall {
         mode: InstallMode::Install,
         canister_id: ic_cdk::api::id(),
-        wasm_module: wasm_module.clone(),
+        wasm_module: wasm_module.to_vec().clone(),
         arg: b" ".to_vec(),
     };
+    // ic_cdk::print(format!("install_config: {:?}", [Principal::management_canister().to_text()]));
 
     let (install_res, ): (CreateResult, ) = match api::call::call(
-        Principal::management_canister(),
+        ic_cdk::api::id(),
+        // Principal::management_canister(),
         "install_code",
         (install_config, ),
-    )
-        .await
-    {
+    ).await {
         Ok(x) => x,
         Err((code, msg)) => {
             return format!(
@@ -120,6 +126,7 @@ async fn create_canister() -> String {
             );
         }
     };
+    // ("An error happened during the call: 3: IC0302: Canister cinef-v4aaa-aaaaa-qaalq-cai has no update method 'install_code'")
     format!("{}", create_result.canister_id)
 }
 

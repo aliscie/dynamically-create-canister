@@ -1,0 +1,2 @@
+kill:
+	kill -INT $(lsof -t -i :4943)
